@@ -1,126 +1,73 @@
-
 #!/usr/bin/env bash
 set -Eeuo pipefail
-
-echo "======================================"
-echo " RedPill DS918+ DSM 6.2.4-25556 Build"
-echo "======================================"
-
-# Build dependencies
-sudo apt-get update
-sudo apt-get install -y --no-install-recommends \
-  ca-certificates build-essential git libssl-dev \
-  curl cpio bsdiff vim gettext bc bison flex \
-  dosfstools kmod jq file xz-utils
+trap 'echo "ERROR: build failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 ROOT="$(pwd)"
 BUILD_DIR="${ROOT}/ds918-6.2.4"
 OUTPUT_DIR="${ROOT}/output"
+KERNEL_URL='https://global.synologydownload.com/download/ToolChain/Synology%20NAS%20GPL%20Source/6.2-25556/apollolake/linux-4.4.x.txz'
+KERNEL_MD5='b0105c224ce0468391ce1027a90d944a'
+
+echo '=== RedPill DS918+ DSM 6.2.4-25556 ==='
+sudo apt-get update
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  ca-certificates build-essential git libssl-dev curl cpio bsdiff \
+  vim gettext bc bison flex dosfstools kmod jq file xz-utils
 
 mkdir -p "$BUILD_DIR" "$OUTPUT_DIR"
 cd "$BUILD_DIR"
 
-# Download RedPill sources
-if [ ! -d redpill-lkm ]; then
-  git clone --depth=1 \
-    https://github.com/RedPill-TTG/redpill-lkm.git
+if [[ ! -d redpill-lkm ]]; then
+  git clone --depth=1 https://github.com/RedPill-TTG/redpill-lkm.git
+fi
+if [[ ! -d redpill-load ]]; then
+  git clone --depth=1 https://github.com/RedPill-TTG/redpill-load.git
 fi
 
-if [ ! -d redpill-load ]; then
-  git clone --depth=1 \
-    https://github.com/RedPill-TTG/redpill-load.git
-fi
-
-# Download Synology kernel source
-KERNEL_URL="https://sourceforge.net/projects/dsgpl/files/Synology%20NAS%20GPL%20Source/25426branch/apollolake-source/linux-4.4.x.txz/download"
-
-echo "Downloading Synology kernel source..."
-
-curl -fL \
-  --retry 3 \
-  --connect-timeout 30 \
-  --max-time 600 \
-  "$KERNEL_URL" \
-  -o linux-4.4.x.txz
-
-echo "Downloaded archive:"
+printf '\nDownloading official Synology ApolloLake kernel source...\n'
+curl --fail --location --retry 3 --retry-delay 5 \
+  --connect-timeout 30 --max-time 1800 \
+  "$KERNEL_URL" --output linux-4.4.x.txz
 ls -lh linux-4.4.x.txz
 file linux-4.4.x.txz
-
-# Verify archive
-if ! xz -t linux-4.4.x.txz; then
-  echo "ERROR: Invalid XZ archive."
-  echo "SourceForge may have returned HTML."
+printf '%s  %s\n' "$KERNEL_MD5" linux-4.4.x.txz | md5sum --check --status || {
+  echo 'ERROR: Synology source archive MD5 mismatch.' >&2
   exit 1
-fi
+}
+xz -t linux-4.4.x.txz
 
-echo "Kernel archive verification passed."
-
-# Build RedPill LKM
+printf '\nPreparing kernel source...\n'
 cd "$BUILD_DIR/redpill-lkm"
-
 tar -xf ../linux-4.4.x.txz
-
-LINUX_SRC="$(find . -maxdepth 1 \
-  -type d -name 'linux-4.4*' -print -quit)"
-
-if [ -z "$LINUX_SRC" ]; then
-  echo "ERROR: Linux source directory not found."
-  exit 1
-fi
-
+LINUX_SRC="$(find "$PWD" -maxdepth 1 -mindepth 1 -type d -name 'linux-4.4*' -print -quit)"
+[[ -n "$LINUX_SRC" ]] || { echo 'ERROR: linux-4.4 source directory not found.' >&2; exit 1; }
 cd "$LINUX_SRC"
-LINUX_SRC="$(pwd)"
-
-if [ ! -f synoconfigs/apollolake ]; then
-  echo "ERROR: ApolloLake kernel config missing."
-  exit 1
-fi
-
+[[ -f synoconfigs/apollolake ]] || { echo 'ERROR: missing synoconfigs/apollolake.' >&2; exit 1; }
 cp synoconfigs/apollolake .config
-echo '+' > .scmversion
-
+printf '+\n' > .scmversion
 make oldconfig
 make modules_prepare
 
+printf '\nBuilding RedPill LKM...\n'
 cd "$BUILD_DIR/redpill-lkm"
-
 make LINUX_SRC="$LINUX_SRC" test-v6
-
-if [ ! -f redpill.ko ]; then
-  echo "ERROR: redpill.ko was not generated."
-  exit 1
-fi
-
+[[ -s redpill.ko ]] || { echo 'ERROR: redpill.ko not generated.' >&2; exit 1; }
 KVERS="$(modinfo -F vermagic redpill.ko | awk '{print $1}')"
+[[ -n "$KVERS" ]] || { echo 'ERROR: unable to read module vermagic.' >&2; exit 1; }
+DEST="$BUILD_DIR/redpill-load/ext/rp-lkm/redpill-linux-v${KVERS}.ko"
+[[ -d "$(dirname "$DEST")" ]] || { echo 'ERROR: expected rp-lkm directory missing.' >&2; exit 1; }
+cp -v redpill.ko "$DEST"
 
-if [ -z "$KVERS" ]; then
-  echo "ERROR: Cannot determine module version."
-  exit 1
-fi
-
-cp -v redpill.ko \
-  "$BUILD_DIR/redpill-load/ext/rp-lkm/redpill-linux-v${KVERS}.ko"
-
-# Build loader
+printf '\nBuilding loader image...\n'
 cd "$BUILD_DIR/redpill-load"
-
+[[ -s "$ROOT/user_config.DS918+.json" ]] || { echo 'ERROR: user_config.DS918+.json not found.' >&2; exit 1; }
+jq -e . "$ROOT/user_config.DS918+.json" >/dev/null
 cp "$ROOT/user_config.DS918+.json" user_config.json
-
 sudo ./build-loader.sh 'DS918+' '6.2.4-25556'
 
-# Copy generated image
-find images -maxdepth 1 -type f \
-  -name 'redpill-DS918+_6.2.4-25556*.img' \
-  -exec cp -v {} "$OUTPUT_DIR/" \;
-
-if ! find "$OUTPUT_DIR" -maxdepth 1 \
-  -name '*.img' | grep -q .; then
-  echo "ERROR: No loader IMG generated."
-  exit 1
-fi
-
-echo "======================================"
-echo " Build completed successfully"
-echo "======================================"
-ls -lh "$OUTPUT_DIR"
+shopt -s nullglob
+images=(images/redpill-DS918+_6.2.4-25556*.img)
+(( ${#images[@]} > 0 )) || { echo 'ERROR: loader IMG not generated.' >&2; exit 1; }
+for img in "${images[@]}"; do cp -v "$img" "$OUTPUT_DIR/"; done
+printf '\n=== Generated images ===\n'
+ls -lh "$OUTPUT_DIR"/*.img
