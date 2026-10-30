@@ -30,25 +30,25 @@ jobs:
             bash build-ds918-7.0.sh
 
       - name: Archive DS3615xs 6.2.4 loader image
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: redpill-DS3615xs_6.2.4-loader
           path: output/redpill-DS3615xs_6.2.4*.img
 
       - name: Archive DS3615xs 7.0 loader image
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: redpill-DS3615xs_7.0-loader
           path: output/redpill-DS3615xs_7.0*.img
 
       - name: Archive DS918+ 6.2.4 loader image
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: redpill-DS918+_6.2.4-loader
           path: output/redpill-DS918+_6.2.4*.img
 
       - name: Archive DS918+ 7.0 loader image
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: redpill-DS918+_7.0-loader
           path: output/redpill-DS918+_7.0*.img
