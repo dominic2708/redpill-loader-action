@@ -1,54 +1,44 @@
-name: Build RedPill DSM loader
 
-on: workflow_dispatch
+name: Build RedPill DS918+ DSM 6.2.4
+
+on:
+  workflow_dispatch:
 
 jobs:
   redpill:
-    runs-on: ubuntu-latest
-    name: Build RedPill lkm and load
+    name: Build DS918+ 6.2.4
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
     steps:
-      - uses: actions/checkout@v2.1.0
-        name: checkout src
-        id: checkout
+      - name: Checkout source
+        uses: actions/checkout@v4
         with:
-          submodules: 'true'
-      - name: Build DS3615xs 6.2.4
-        id: build-ds3615xs-624
-        run: |
-            bash build-ds3615xs-6.2.4.sh
-      - name: Build DS3615xs 7.0
-        id: build-ds3615xs-70
-        run: |
-            bash build-ds3615xs-7.0.sh
-      - name: Build DS918+ 6.2.4
-        id: build-ds918-624
-        run: |
-            bash build-ds918-6.2.4.sh
-      - name: Build DS918+ 7.0
-        id: build-ds918-70
-        run: |
-            bash build-ds918-7.0.sh
+          submodules: recursive
 
-      - name: Archive DS3615xs 6.2.4 loader image
+      - name: Show build environment
+        run: |
+          uname -a
+          gcc --version
+          make --version
+          docker --version
+
+      - name: Build DS918+ DSM 6.2.4
+        shell: bash
+        run: |
+          set -e
+          bash build-ds918-6.2.4.sh
+
+      - name: List generated images
+        if: always()
+        run: |
+          echo "Generated IMG files:"
+          find output -type f -name '*.img' -ls || true
+
+      - name: Upload DS918+ loader
         uses: actions/upload-artifact@v4
         with:
-          name: redpill-DS3615xs_6.2.4-loader
-          path: output/redpill-DS3615xs_6.2.4*.img
-
-      - name: Archive DS3615xs 7.0 loader image
-        uses: actions/upload-artifact@v4
-        with:
-          name: redpill-DS3615xs_7.0-loader
-          path: output/redpill-DS3615xs_7.0*.img
-
-      - name: Archive DS918+ 6.2.4 loader image
-        uses: actions/upload-artifact@v4
-        with:
-          name: redpill-DS918+_6.2.4-loader
+          name: redpill-DS918-6.2.4-loader
           path: output/redpill-DS918+_6.2.4*.img
-
-      - name: Archive DS918+ 7.0 loader image
-        uses: actions/upload-artifact@v4
-        with:
-          name: redpill-DS918+_7.0-loader
-          path: output/redpill-DS918+_7.0*.img
+          if-no-files-found: error
+          retention-days: 7
